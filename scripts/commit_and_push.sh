@@ -1,13 +1,14 @@
 #!/bin/bash
-# scripts/commit_and_push.sh — 自动化提交并创建 PR
-# 用法: ./scripts/commit_and_push.sh "commit message" [pr-title]
+# scripts/commit_and_push.sh — 自动化提交并推送到 fork 仓库
+# 用法: ./scripts/commit_and_push.sh "commit message"
 #
-# 自动处理: git身份、gh认证、远程冲突rebase、分支隔离、PR创建
+# 只推送到 fork (xiaodutou/TradingAgents-CN-xdt)，不创建上游 PR
+# 自动处理: git身份、gh认证、远程冲突rebase、分支推送
 
 set -euo pipefail
 
-REPO_OWNER="hsliuping"
-REPO_NAME="TradingAgents-CN"
+REPO_OWNER="xiaodutou"
+REPO_NAME="TradingAgents-CN-xdt"
 FORK_OWNER="xiaodutou"
 FORK_REPO="TradingAgents-CN-xdt"
 GIT_NAME="xiaodutou"
@@ -31,10 +32,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    if ! git diff --quiet || git diff --cached --quiet 2>/dev/null; then
-        : # 有变更，继续
-    fi
-
     # 确保 git 身份已配置
     if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
         warn "未配置 git 身份，自动设置为 ${GIT_NAME} <${GIT_EMAIL}>"
@@ -46,15 +43,13 @@ check_prerequisites() {
 # ========== 参数解析 ==========
 COMMIT_MSG="${1:-}"
 if [ -z "${COMMIT_MSG}" ]; then
-    echo "用法: $0 \"commit message\" [\"PR title\"]"
+    echo "用法: $0 \"commit message\""
     echo ""
     echo "示例:"
     echo "  $0 \"fix: 修复 PB 计算错误\""
-    echo "  $0 \"fix: 修复 PB 计算\" \"fix: 提升报告数据质量\""
+    echo "  $0 \"feat: 添加新功能\""
     exit 1
 fi
-
-PR_TITLE="${2:-${COMMIT_MSG}}"
 
 # ========== 检查是否有变更 ==========
 STAGED_FILES=$(git status --porcelain | grep -c '^[ MARCD]' 2>/dev/null || echo 0)
@@ -76,26 +71,33 @@ git -c user.name="${GIT_NAME}" -c user.email="${GIT_EMAIL}" commit -m "${COMMIT_
 
 info "提交完成: $(git log --oneline -1)"
 
-# ========== 同步远程变更并推送 ==========
-info "同步远程变更并推送..."
+# ========== 推送到 fork 仓库 ==========
+info "推送到 fork 仓库 (xiaodutou/TradingAgents-CN-xdt)..."
 
 # 确保 xdt remote 存在
 if ! git remote | grep -q "^xdt$"; then
     git remote add xdt "https://github.com/${FORK_OWNER}/${FORK_REPO}.git"
 fi
 
-# 使用 gh 认证推送
-git -c credential.helper="!gh auth git-credential" pull xdt main --rebase || {
-    warn "Rebase 有冲突，正在中止并尝试合并..."
-    git rebase --abort 2>/dev/null || true
-    git -c credential.helper="!gh auth git-credential" pull xdt main --no-rebase || {
-        error "拉取远程变更失败，请手动处理冲突后重试"
+CURRENT_BRANCH=$(git branch --show-current)
+
+# 尝试拉取 fork 上的同分支变更（避免冲突）
+if [ "${CURRENT_BRANCH}" = "main" ]; then
+    git -c credential.helper="!gh auth git-credential" pull xdt main --rebase 2>/dev/null || {
+        warn "Rebase 有冲突，中止推送"
+        git rebase --abort 2>/dev/null || true
+        error "请先手动处理冲突"
         exit 1
     }
-}
+else
+    # feature 分支：尝试拉取同分支，如果不存在则跳过
+    git -c credential.helper="!gh auth git-credential" pull xdt "${CURRENT_BRANCH}" --rebase 2>/dev/null || {
+        warn "远程分支 ${CURRENT_BRANCH} 不存在或 rebase 冲突，跳过 pull"
+        git rebase --abort 2>/dev/null || true
+    }
+fi
 
-# 推送当前分支（如果在 feature 分支则推该分支，否则推 main）
-CURRENT_BRANCH=$(git branch --show-current)
+# 推送到 fork
 if [ "${CURRENT_BRANCH}" = "main" ]; then
     git -c credential.helper="!gh auth git-credential" push xdt main
 else
@@ -105,33 +107,7 @@ else
 fi
 
 info "推送完成"
-
-# ========== 创建 PR ==========
-info "创建 Pull Request..."
-
-if [ "${CURRENT_BRANCH}" = "main" ]; then
-    # main 分支：使用 xiaodutou:main -> hsliuping:main
-    PR_URL=$(gh pr create \
-        --repo "${REPO_OWNER}/${REPO_NAME}" \
-        --base main \
-        --head "${FORK_OWNER}:main" \
-        --title "${PR_TITLE}" \
-        --body "## Summary
-
-$(git log --format='%b' -1 | head -30)
-
-Generated with Claude Code" 2>&1) || true
-else
-    PR_URL=$(gh pr create \
-        --repo "${REPO_OWNER}/${REPO_NAME}" \
-        --base main \
-        --head "${FORK_OWNER}:${CURRENT_BRANCH}" \
-        --title "${PR_TITLE}" \
-        --body "Generated with Claude Code" 2>&1) || true
-fi
-
-if echo "${PR_URL}" | grep -q "^https://"; then
-    info "PR 创建成功: ${PR_URL}"
-else
-    warn "PR 可能已存在或创建失败: ${PR_URL}"
+info "查看 fork: https://github.com/xiaodutou/TradingAgents-CN-xdt"
+if [ "${CURRENT_BRANCH}" != "main" ]; then
+    info "创建 PR: https://github.com/xiaodutou/TradingAgents-CN-xdt/compare/main...${CURRENT_BRANCH}"
 fi
