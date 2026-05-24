@@ -570,11 +570,29 @@ class OptimizedChinaDataProvider:
                 profit_growth = financial_estimates.get('net_profit_yoy_growth', 'N/A')
                 eps = financial_estimates.get('quarterly_eps', 'N/A')
                 periods_info = financial_estimates.get('financial_periods_info', '')
+
+                # 🔥 新增：扣非净利润、经营现金流、研发费用
+                deducted_profit = financial_estimates.get('quarterly_deducted_net_profit', '')
+                deducted_growth = financial_estimates.get('deducted_net_profit_yoy_growth', '')
+                operating_cf = financial_estimates.get('operating_cash_flow', '')
+                rd_expense = financial_estimates.get('rd_expense', '')
+
+                extra_financial_lines = ""
+                if deducted_profit:
+                    extra_financial_lines += f"- **扣非净利润**: {deducted_profit}"
+                    if deducted_growth:
+                        extra_financial_lines += f"（同比{deducted_growth}）"
+                    extra_financial_lines += "\n"
+                if operating_cf:
+                    extra_financial_lines += f"- **经营活动现金流**: {operating_cf}\n"
+                if rd_expense:
+                    extra_financial_lines += f"- **研发费用**: {rd_expense}\n"
+
                 quarterly_data_section = f"""
 ### 最新季度财务数据（真实数据，非估算）
 - **营业收入**: {rev}
 - **净利润**: {profit}
-- **营业收入同比增长**: {rev_growth}
+{extra_financial_lines}- **营业收入同比增长**: {rev_growth}
 - **净利润同比增长**: {profit_growth}
 - **基本每股收益**: {eps}
 {("注: " + periods_info) if periods_info else ""}
@@ -651,11 +669,29 @@ class OptimizedChinaDataProvider:
                 profit_growth = financial_estimates.get('net_profit_yoy_growth', 'N/A')
                 eps = financial_estimates.get('quarterly_eps', 'N/A')
                 periods_info = financial_estimates.get('financial_periods_info', '')
+
+                # 🔥 新增：扣非净利润、经营现金流、研发费用
+                deducted_profit = financial_estimates.get('quarterly_deducted_net_profit', '')
+                deducted_growth = financial_estimates.get('deducted_net_profit_yoy_growth', '')
+                operating_cf = financial_estimates.get('operating_cash_flow', '')
+                rd_expense = financial_estimates.get('rd_expense', '')
+
+                extra_financial_lines = ""
+                if deducted_profit:
+                    extra_financial_lines += f"- **扣非净利润**: {deducted_profit}"
+                    if deducted_growth:
+                        extra_financial_lines += f"（同比{deducted_growth}）"
+                    extra_financial_lines += "\n"
+                if operating_cf:
+                    extra_financial_lines += f"- **经营活动现金流**: {operating_cf}\n"
+                if rd_expense:
+                    extra_financial_lines += f"- **研发费用**: {rd_expense}\n"
+
                 quarterly_data_section_detailed = f"""
 ### 最新季度财务数据（真实数据，非估算）
 - **营业收入**: {rev}
 - **净利润**: {profit}
-- **营业收入同比增长**: {rev_growth}
+{extra_financial_lines}- **营业收入同比增长**: {rev_growth}
 - **净利润同比增长**: {profit_growth}
 - **基本每股收益**: {eps}
 {("注: " + periods_info) if periods_info else ""}
@@ -1907,6 +1943,66 @@ class OptimizedChinaDataProvider:
                         metrics['quarterly_eps'] = f"{float(eps):.4f}元"
                     except (ValueError, TypeError):
                         pass
+
+                # 🔥 提取扣非净利润（关键：反映主营业务真实盈利）
+                deducted_net_profit = indicators_dict.get('扣非净利润') or indicators_dict.get('扣除非经常性损益后的净利润')
+                if deducted_net_profit is not None and str(deducted_net_profit) != 'nan' and deducted_net_profit != '--':
+                    try:
+                        deducted_val = float(deducted_net_profit)
+                        if deducted_val >= 100_000_000:
+                            metrics['quarterly_deducted_net_profit'] = f"{deducted_val / 100_000_000:.2f}亿元"
+                        elif deducted_val >= 10000:
+                            metrics['quarterly_deducted_net_profit'] = f"{deducted_val / 10000:.2f}亿元"
+                        else:
+                            metrics['quarterly_deducted_net_profit'] = f"{deducted_val:.2f}万元"
+                        metrics['quarterly_deducted_net_profit_raw'] = deducted_val
+                    except (ValueError, TypeError):
+                        pass
+
+                # 🔥 提取扣非净利润同比增长率
+                deducted_growth = indicators_dict.get('扣非净利润同比增长率')
+                if deducted_growth is not None and str(deducted_growth) != 'nan' and deducted_growth != '--':
+                    try:
+                        growth_val = float(deducted_growth)
+                        metrics['deducted_net_profit_yoy_growth'] = f"{growth_val:+.2f}%"
+                    except (ValueError, TypeError):
+                        pass
+
+        # 🔥 从 cash_flow 中提取经营现金流
+        cash_flow_list = financial_data.get('cash_flow', [])
+        if cash_flow_list and len(cash_flow_list) > 0:
+            try:
+                latest_cash = cash_flow_list[0]
+                # 经营活动产生的现金流量净额
+                operating_cf = latest_cash.get('n_cashflow_act') or latest_cash.get('经营活动产生的现金流量净额') or latest_cash.get('经营活动产生的现金流量净额_合并报表')
+                if operating_cf is not None and str(operating_cf) != 'nan' and operating_cf != '--':
+                    cf_val = float(operating_cf)
+                    if abs(cf_val) >= 100_000_000:
+                        metrics['operating_cash_flow'] = f"{cf_val / 100_000_000:.2f}亿元"
+                    elif abs(cf_val) >= 10000:
+                        metrics['operating_cash_flow'] = f"{cf_val / 10000:.2f}万元"
+                    else:
+                        metrics['operating_cash_flow'] = f"{cf_val:.2f}元"
+                    metrics['operating_cash_flow_raw'] = cf_val
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                logger.debug(f"提取经营现金流失败: {e}")
+
+        # 🔥 从 income_statement 中提取研发费用
+        if income_statement and len(income_statement) > 0:
+            try:
+                latest_stmt = income_statement[0]
+                rd_expense = latest_stmt.get('rd_expense') or latest_stmt.get('研发费用') or latest_stmt.get('research_expense')
+                if rd_expense is not None and str(rd_expense) != 'nan' and rd_expense != '--':
+                    rd_val = float(rd_expense)
+                    if rd_val >= 100_000_000:
+                        metrics['rd_expense'] = f"{rd_val / 100_000_000:.2f}亿元"
+                    elif rd_val >= 10000:
+                        metrics['rd_expense'] = f"{rd_val / 10000:.2f}万元"
+                    else:
+                        metrics['rd_expense'] = f"{rd_val:.2f}元"
+                    metrics['rd_expense_raw'] = rd_val
+            except (ValueError, TypeError, IndexError, KeyError) as e:
+                logger.debug(f"提取研发费用失败: {e}")
 
         # 从 income_statement 中提取多期数据用于对比
         if income_statement and len(income_statement) >= 2:
