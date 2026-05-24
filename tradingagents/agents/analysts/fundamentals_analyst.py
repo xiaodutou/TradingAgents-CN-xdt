@@ -17,6 +17,7 @@ logger = get_logger("default")
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.utils.data_quality import check_report_data
 
 
 def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
@@ -486,6 +487,20 @@ def create_fundamentals_analyst(llm, toolkit):
                     report = str(force_result.content) if hasattr(force_result, 'content') else "基本面分析完成"
                     logger.info(f"✅ [强制生成报告] 成功生成报告，长度: {len(report)}字符")
 
+                    # 检查工具返回的原始数据是否全部为错误信息
+                    for msg in messages:
+                        if isinstance(msg, ToolMessage):
+                            quality = check_report_data(str(msg.content), ticker, "基本面分析")
+                            if quality["has_failure"]:
+                                logger.error(f"❌ [数据质量门] 基本面工具返回数据为错误信息: {quality['error_message']}")
+                                report = f"❌ 基本面数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                                return {
+                                    "fundamentals_report": report,
+                                    "messages": [force_result],
+                                    "fundamentals_tool_call_count": tool_call_count,
+                                    "data_all_failed": True,
+                                }
+
                     return {
                         "fundamentals_report": report,
                         "messages": [force_result],
@@ -639,7 +654,18 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.debug(f"📊 [DEBUG] 统一工具调用异常: {e}")
                 
                 currency_info = f"{market_info['currency_name']}（{market_info['currency_symbol']}）"
-                
+
+                # 在调用LLM前检查数据质量 — 防止对错误数据进行分析
+                quality = check_report_data(str(combined_data), ticker, "基本面分析")
+                if quality["has_failure"]:
+                    logger.error(f"❌ [数据质量门] 基本面工具返回错误数据，跳过LLM分析: {quality['error_message']}")
+                    report = f"❌ 基本面数据获取失败: {quality['error_message']}。建议检查数据源配置或稍后重试。"
+                    return {
+                        "fundamentals_report": report,
+                        "fundamentals_tool_call_count": tool_call_count,
+                        "data_all_failed": True,
+                    }
+
                 # 生成基于真实数据的分析报告
                 analysis_prompt = f"""基于以下真实数据，对{company_name}（股票代码：{ticker}）进行详细的基本面分析：
 

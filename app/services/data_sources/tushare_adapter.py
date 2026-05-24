@@ -87,15 +87,6 @@ class TushareAdapter(DataSourceAdapter):
         if not self.is_available():
             return None
         try:
-            # 自定义API模式
-            if getattr(self._provider, "use_custom_api", False):
-                fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
-                df = self._provider._custom_api_call("daily_basic", {"trade_date": trade_date}, fields)
-                if df is not None and not df.empty:
-                    logger.info(f"Tushare: Successfully fetched daily data for {trade_date}, {len(df)} records")
-                    return df
-                return None
-            # 官方API模式
             fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
             df = self._provider.api.daily_basic(trade_date=trade_date, fields=fields)
             if df is not None and not df.empty:
@@ -109,44 +100,6 @@ class TushareAdapter(DataSourceAdapter):
         """Get full-market near real-time quotes via Tushare rt_k fallback"""
         if not self.is_available():
             return None
-        # 自定义API模式
-        if getattr(self._provider, "use_custom_api", False):
-            df = self._provider._custom_api_call("rt_k", {"ts_code": "3*.SZ,6*.SH,0*.SZ,9*.BJ"}, "ts_code,name,open,high,low,close,pre_close,vol,amount,num")
-            if df is None or getattr(df, 'empty', True):
-                logger.warning('Tushare rt_k (custom API) returned empty data')
-                return None
-            result: Dict[str, Dict[str, Optional[float]]] = {}
-            for _, row in df.iterrows():
-                ts_code = str(row.get('ts_code') or '')
-                if not ts_code or '.' not in ts_code:
-                    continue
-                code6 = ts_code.split('.')[0].zfill(6)
-                close = float(row.get('close')) if row.get('close') is not None else None
-                pre_close = float(row.get('pre_close')) if row.get('pre_close') is not None else None
-                amount = float(row.get('amount')) if row.get('amount') is not None else None
-                pct_chg = None
-                if 'pct_chg' in df.columns and row.get('pct_chg') is not None:
-                    try:
-                        pct_chg = float(row.get('pct_chg'))
-                    except Exception:
-                        pct_chg = None
-                if pct_chg is None and close is not None and pre_close is not None and pre_close not in (0, 0.0):
-                    try:
-                        pct_chg = (close / pre_close - 1.0) * 100.0
-                    except Exception:
-                        pct_chg = None
-                vol = None
-                if 'vol' in df.columns:
-                    vol = float(row.get('vol')) if row.get('vol') is not None else None
-                    if vol is not None:
-                        vol = vol * 100
-                elif 'volume' in df.columns:
-                    vol = float(row.get('volume')) if row.get('volume') is not None else None
-                    if vol is not None:
-                        vol = vol * 100
-                result[code6] = {'close': close, 'pct_chg': pct_chg, 'amount': amount, 'volume': vol, 'pre_close': pre_close}
-            return result
-        # 官方API模式
         try:
             df = self._provider.api.rt_k(ts_code='3*.SZ,6*.SH,0*.SZ,9*.BJ')
             if df is None or getattr(df, 'empty', True):
@@ -215,7 +168,7 @@ class TushareAdapter(DataSourceAdapter):
             prov = self._provider
             if prov is None or prov.api is None:
                 return None
-            ts_code = prov._normalize_symbol(code) if hasattr(prov, "_normalize_symbol") else code
+            ts_code = prov._normalize_ts_code(code) if hasattr(prov, "_normalize_ts_code") else code
             freq_map = {
                 "day": "D", "week": "W", "month": "M",
                 "5m": "5min", "15m": "15min", "30m": "30min", "60m": "60min",
@@ -264,7 +217,7 @@ class TushareAdapter(DataSourceAdapter):
             return None
         items = []
         try:
-            ts_code = self._provider._normalize_symbol(code) if hasattr(self._provider, "_normalize_symbol") else code
+            ts_code = self._provider._normalize_ts_code(code) if hasattr(self._provider, "_normalize_ts_code") else code
         except Exception:
             ts_code = code
         try:
@@ -313,11 +266,7 @@ class TushareAdapter(DataSourceAdapter):
             for delta in range(0, 10):
                 d = (today - timedelta(days=delta)).strftime("%Y%m%d")
                 try:
-                    # 自定义API模式
-                    if getattr(self._provider, "use_custom_api", False):
-                        db = self._provider._custom_api_call("daily_basic", {"trade_date": d}, "ts_code,total_mv")
-                    else:
-                        db = self._provider.api.daily_basic(trade_date=d, fields="ts_code,total_mv")
+                    db = self._provider.api.daily_basic(trade_date=d, fields="ts_code,total_mv")
                     if db is not None and not db.empty:
                         logger.info(f"Tushare: Found latest trade date: {d}")
                         return d
