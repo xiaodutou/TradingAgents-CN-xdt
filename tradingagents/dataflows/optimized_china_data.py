@@ -546,6 +546,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+- **💡 PE与PE_TTM差异说明**: 若 PE 显著高于 PE_TTM，说明最近季度利润低于年化水平；若 PE 显著低于 PE_TTM，说明最近季度利润高于年化水平
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **净资产收益率(ROE)**: {financial_estimates.get('roe', 'N/A')}
 - **资产负债率**: {financial_estimates.get('debt_ratio', 'N/A')}
@@ -619,6 +620,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+- **💡 PE与PE_TTM差异说明**: 若 PE 显著高于 PE_TTM，说明最近季度利润低于年化水平；若 PE 显著低于 PE_TTM，说明最近季度利润高于年化水平
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
@@ -718,6 +720,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+- **💡 PE与PE_TTM差异说明**: 若 PE 显著高于 PE_TTM，说明最近季度利润低于年化水平；若 PE 显著低于 PE_TTM，说明最近季度利润高于年化水平
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
@@ -2135,9 +2138,17 @@ class OptimizedChinaDataProvider:
 
             # 计算各项指标（只有在有准确市值时才计算）
             if market_cap:
-                # PE比率（优先使用 TTM 净利润）
+                # PE_TTM（基于 TTM 净利润计算）
+                if ttm_net_income and ttm_net_income > 0:
+                    pe_ttm_ratio = market_cap / (ttm_net_income * 10000)
+                    metrics["pe_ttm"] = f"{pe_ttm_ratio:.1f}倍"
+                    logger.info(f"✅ Tushare 计算PE_TTM: 市值{market_cap/100000000:.2f}亿元 / TTM净利润{ttm_net_income:.2f}万元 = {pe_ttm_ratio:.1f}倍")
+                else:
+                    metrics["pe_ttm"] = "N/A"
+
+                # PE（基于单期或 TTM 净利润）
                 if net_income > 0:
-                    pe_ratio = market_cap / (net_income * 10000)  # 转换单位
+                    pe_ratio = market_cap / (net_income * 10000)
                     metrics["pe"] = f"{pe_ratio:.1f}倍"
                     logger.info(f"✅ Tushare 计算PE({profit_type}): 市值{market_cap/100000000:.2f}亿元 / 净利润{net_income:.2f}万元 = {pe_ratio:.1f}倍")
                 else:
