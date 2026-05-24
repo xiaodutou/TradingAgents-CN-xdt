@@ -45,6 +45,46 @@ class OptimizedChinaDataProvider:
 
         self.last_api_call = time.time()
 
+    def _run_async(self, coro, timeout=20):
+        """安全地从同步代码运行异步协程，兼容 FastAPI 的 async 事件循环"""
+        import asyncio
+        import threading
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            if threading.current_thread() is threading.main_thread():
+                # MainThread 阻塞保护：在新线程中创建独立事件循环
+                result = [None]
+                exception = [None]
+                def _run_in_new_thread():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result[0] = new_loop.run_until_complete(coro)
+                    except Exception as e:
+                        exception[0] = e
+                    finally:
+                        new_loop.close()
+                t = threading.Thread(target=_run_in_new_thread)
+                t.start()
+                t.join(timeout=timeout)
+                if exception[0]:
+                    raise exception[0]
+                if t.is_alive():
+                    raise TimeoutError(f"_run_async 执行超时 ({timeout}s)")
+                return result[0]
+            else:
+                # 工作线程：使用 run_coroutine_threadsafe
+                import concurrent.futures
+                future = asyncio.run_coroutine_threadsafe(coro, loop)
+                return future.result(timeout=timeout)
+        else:
+            return asyncio.run(coro)
+
     def _format_financial_data_to_fundamentals(self, financial_data: Dict[str, Any], symbol: str) -> str:
         """将MongoDB财务数据转换为基本面分析格式"""
         try:
@@ -433,32 +473,34 @@ class OptimizedChinaDataProvider:
             logger.warning(f"⚠️ [基本面分析] 无法获取财务指标: {e}")
             logger.info(f"📊 [基本面分析] 返回简化的基本面报告（无财务指标）")
 
-            # 返回简化的基本面报告（不包含财务指标）
-            simplified_report = f"""# 中国A股基本面分析报告 - {symbol} (简化版)
-
-## 📊 基本信息
-- **股票代码**: {symbol}
-- **公司名称**: {company_name}
-- **所属行业**: {industry_info.get('industry', '未知')}
-- **当前价格**: {current_price}
-- **涨跌幅**: {change_pct}
-- **成交量**: {volume}
-
-## 📈 行业分析
-{industry_info.get('analysis', '暂无行业分析')}
-
-## ⚠️ 数据说明
-由于无法获取完整的财务数据，本报告仅包含基本价格信息和行业分析。
-建议：
-1. 查看公司最新财报获取详细财务数据
-2. 关注行业整体走势
-3. 结合技术分析进行综合判断
-
----
-**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
-**数据来源**: 基础市场数据
-"""
-            return simplified_report.strip()
+            # 返回明确的失败信号：所有数据源均不可用，禁止编造数据
+            error_report = (
+                f"# ❌ 财务数据获取失败\n\n"
+                f"**股票代码**: {symbol}\n"
+                f"**公司名称**: {company_name}\n\n"
+                f"## ⚠️ 数据获取失败\n\n"
+                f"无法获取该股票的财务数据。已尝试所有可用的数据源：\n"
+                f"1. MongoDB 缓存：未找到数据\n"
+                f"2. AKShare API：{'IP封锁/网络不可用' if 'akshare' in str(e).lower() or 'akshare' in str(e).lower() else '不可用'}\n"
+                f"3. Tushare API：{'未连接或权限不足' if 'tushare' in str(e).lower() else '不可用'}\n\n"
+                f"## 🚫 重要提示：禁止编造数据\n\n"
+                f"由于无法获取真实财务数据，**你绝对不能编造、推测或虚构任何财务指标**，包括但不限于：\n"
+                f"- 营业收入、净利润、毛利率\n"
+                f"- PE、PB、PS 等估值指标\n"
+                f"- ROE、ROA 等盈利能力指标\n"
+                f"- 资产负债率、现金流等财务健康指标\n"
+                f"- 销量、交付量等业务数据\n\n"
+                f"你必须在分析报告中明确说明：\n"
+                f"1. 财务数据获取失败，无法进行基本面分析\n"
+                f"2. 所有估值、盈利、杠杆等财务指标均无法提供\n"
+                f"3. 建议用户通过其他渠道（如东方财富、同花顺等）查看最新财报\n\n"
+                f"## 📊 仅可参考的基本信息\n"
+                f"- 当前价格: {current_price}\n"
+                f"- 涨跌幅: {change_pct}\n"
+                f"- 成交量: {volume}\n"
+                f"- 所属行业: {industry_info.get('industry', '未知')}\n"
+            )
+            return error_report.strip()
 
         logger.debug(f"🔍 [股票代码追踪] 开始生成报告，使用股票代码: '{symbol}'")
 
@@ -901,57 +943,61 @@ class OptimizedChinaDataProvider:
             akshare_provider = get_akshare_provider()
 
             if akshare_provider.connected:
-                # AKShare的get_financial_data是异步方法，需要使用asyncio运行
-                loop = asyncio.get_event_loop()
-                financial_data = loop.run_until_complete(akshare_provider.get_financial_data(symbol))
+                # AKShare的get_financial_data是异步方法，使用 _run_async 安全调用
+                try:
+                    financial_data = self._run_async(akshare_provider.get_financial_data(symbol))
 
-                if financial_data and any(not v.empty if hasattr(v, 'empty') else bool(v) for v in financial_data.values()):
-                    logger.info(f"✅ AKShare财务数据获取成功: {symbol}")
-                    # 获取股票基本信息（也是异步方法）
-                    stock_info = loop.run_until_complete(akshare_provider.get_stock_basic_info(symbol))
+                    if financial_data and any(not v.empty if hasattr(v, 'empty') else bool(v) for v in financial_data.values()):
+                        logger.info(f"✅ AKShare财务数据获取成功: {symbol}")
+                        # 获取股票基本信息（也是异步方法）
+                        stock_info = self._run_async(akshare_provider.get_stock_basic_info(symbol))
 
-                    # 解析AKShare财务数据
-                    logger.debug(f"🔧 调用AKShare解析函数，股价: {price_value}")
-                    metrics = self._parse_akshare_financial_data(financial_data, stock_info, price_value)
-                    logger.debug(f"🔧 AKShare解析结果: {metrics}")
-                    if metrics:
-                        logger.info(f"✅ AKShare解析成功，返回指标")
-                        # 缓存原始财务数据到数据库（而不是解析后的指标）
-                        self._cache_raw_financial_data(symbol, financial_data, stock_info)
-                        return metrics
+                        # 解析AKShare财务数据
+                        logger.debug(f"🔧 调用AKShare解析函数，股价: {price_value}")
+                        metrics = self._parse_akshare_financial_data(financial_data, stock_info, price_value)
+                        logger.debug(f"🔧 AKShare解析结果: {metrics}")
+                        if metrics:
+                            logger.info(f"✅ AKShare解析成功，返回指标")
+                            # 缓存原始财务数据到数据库（而不是解析后的指标）
+                            self._cache_raw_financial_data(symbol, financial_data, stock_info)
+                            return metrics
+                        else:
+                            logger.warning(f"⚠️ AKShare解析失败，返回None")
                     else:
-                        logger.warning(f"⚠️ AKShare解析失败，返回None")
-                else:
-                    logger.warning(f"⚠️ AKShare未获取到{symbol}财务数据，尝试Tushare")
+                        logger.warning(f"⚠️ AKShare未获取到{symbol}财务数据，尝试Tushare")
+                except Exception as ak_e:
+                    logger.warning(f"⚠️ AKShare财务数据获取异常: {ak_e}，尝试Tushare")
             else:
                 logger.warning(f"⚠️ AKShare未连接，尝试Tushare")
 
             # 第三优先级：使用Tushare数据源
             logger.info(f"🔄 使用Tushare备用数据源获取{symbol}财务数据")
             from .providers.china.tushare import get_tushare_provider
-            import asyncio
 
             provider = get_tushare_provider()
             if not provider.connected:
-                logger.debug(f"Tushare未连接，无法获取{symbol}真实财务数据")
+                logger.warning(f"⚠️ Tushare未连接，无法获取{symbol}真实财务数据")
                 return None
 
-            # 获取财务数据（异步方法）
-            loop = asyncio.get_event_loop()
-            financial_data = loop.run_until_complete(provider.get_financial_data(symbol))
-            if not financial_data:
-                logger.debug(f"未获取到{symbol}的财务数据")
+            try:
+                # 获取财务数据（异步方法）
+                financial_data = self._run_async(provider.get_financial_data(symbol))
+                if not financial_data:
+                    logger.warning(f"⚠️ 未获取到{symbol}的Tushare财务数据")
+                    return None
+
+                # 获取股票基本信息（异步方法）
+                stock_info = self._run_async(provider.get_stock_basic_info(symbol))
+
+                # 解析Tushare财务数据
+                metrics = self._parse_financial_data(financial_data, stock_info, price_value)
+                if metrics:
+                    # 缓存原始财务数据到数据库
+                    self._cache_raw_financial_data(symbol, financial_data, stock_info)
+                    return metrics
+            except Exception as ts_e:
+                logger.warning(f"⚠️ Tushare财务数据获取异常: {ts_e}")
                 return None
-
-            # 获取股票基本信息（异步方法）
-            stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
-
-            # 解析Tushare财务数据
-            metrics = self._parse_financial_data(financial_data, stock_info, price_value)
-            if metrics:
-                # 缓存原始财务数据到数据库
-                self._cache_raw_financial_data(symbol, financial_data, stock_info)
-                return metrics
 
         except Exception as e:
             logger.debug(f"获取{symbol}真实财务数据失败: {e}")
