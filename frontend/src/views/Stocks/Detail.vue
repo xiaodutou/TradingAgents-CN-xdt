@@ -398,7 +398,6 @@ const activeReportTab = ref('')
 const code = computed(() => {
   const routeCode = String(route.params.code || '').toUpperCase()
   if (!routeCode) {
-    ElMessage.error('股票代码不能为空')
     router.push({ name: 'Dashboard' })
     return ''
   }

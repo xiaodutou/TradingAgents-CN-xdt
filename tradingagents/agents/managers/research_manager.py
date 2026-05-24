@@ -34,6 +34,9 @@ def create_research_manager(llm, memory):
 
         investment_debate_state = state["investment_debate_state"]
 
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
+
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
         # 安全检查：确保memory不为None
@@ -72,6 +75,12 @@ def create_research_manager(llm, memory):
 
 标的约束：
 {instrument_context}
+
+🚫 事实约束：
+- 当前日期是 {current_date}，任何此日期之后的事件都不是事实
+- 请验证辩论中出现的数值声明是否与基本面报告中的数据一致
+- 如果辩论中引用了基本面报告中不存在的数据，请明确指出并忽略
+- 你的投资计划中引用的所有数据必须来自下方提供的真实报告
 
 以下是综合分析报告：
 市场研究：{market_research_report}

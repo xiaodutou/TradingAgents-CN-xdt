@@ -23,6 +23,9 @@ def create_risk_manager(llm, memory):
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
+
         # 安全检查：确保memory不为None
         if memory is not None:
             past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -48,6 +51,11 @@ def create_risk_manager(llm, memory):
 
 标的约束：
 {instrument_context}
+
+🚫 事实约束：
+- 当前日期是 {current_date}，任何此日期之后的事件都不是事实
+- 请验证辩论中出现的数值声明是否与基本面报告中的数据一致
+- 你的决策和建议中引用的所有数据必须来自下方提供的真实报告
 
 ---
 

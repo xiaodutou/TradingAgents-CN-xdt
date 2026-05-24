@@ -417,6 +417,7 @@ class OptimizedChinaDataProvider:
             logger.debug(f"🔍 [股票代码追踪] 读取market_quotes失败（忽略）: {_qe}")
 
         # 然后从股票数据中提取价格信息
+        # 提取公司名称（如果存在）
         if "股票名称:" in stock_data:
             lines = stock_data.split('\n')
             for line in lines:
@@ -425,7 +426,6 @@ class OptimizedChinaDataProvider:
                 elif "当前价格:" in line:
                     current_price = line.split(':')[1].strip()
                 elif "最新价格:" in line or "💰 最新价格:" in line:
-                    # 兼容另一种模板输出
                     try:
                         current_price = line.split(':', 1)[1].strip().lstrip('¥').strip()
                     except Exception:
@@ -434,6 +434,17 @@ class OptimizedChinaDataProvider:
                     change_pct = line.split(':')[1].strip()
                 elif "成交量:" in line:
                     volume = line.split(':')[1].strip()
+
+        # 🔥 兜底：从 stock_data 中提取 "最新价格:" 行（兼容 get_china_stock_data_unified 返回的数据格式）
+        if current_price == "N/A" and stock_data:
+            for line in stock_data.split('\n'):
+                if "最新价格:" in line or "💰 最新价格:" in line:
+                    try:
+                        current_price = line.split(':', 1)[1].strip().lstrip('¥').strip()
+                        logger.info(f"✅ 从 stock_data 提取到最新价格: {current_price}")
+                    except Exception:
+                        pass
+                    break
 
         # 尝试从股票数据表格中提取最新价格信息
         if current_price == "N/A" and stock_data:
@@ -550,6 +561,28 @@ class OptimizedChinaDataProvider:
 """
         elif analysis_modules in ["standard", "full"]:
             # 标准/完整模式：包含详细分析
+            # 添加原始季度财务数据（防止 LLM 编造）
+            quarterly_data_section = ""
+            if financial_estimates.get('quarterly_revenue') or financial_estimates.get('quarterly_net_profit'):
+                rev = financial_estimates.get('quarterly_revenue', 'N/A')
+                profit = financial_estimates.get('quarterly_net_profit', 'N/A')
+                rev_growth = financial_estimates.get('revenue_yoy_growth', 'N/A')
+                profit_growth = financial_estimates.get('net_profit_yoy_growth', 'N/A')
+                eps = financial_estimates.get('quarterly_eps', 'N/A')
+                periods_info = financial_estimates.get('financial_periods_info', '')
+                quarterly_data_section = f"""
+### 最新季度财务数据（真实数据，非估算）
+- **营业收入**: {rev}
+- **净利润**: {profit}
+- **营业收入同比增长**: {rev_growth}
+- **净利润同比增长**: {profit_growth}
+- **基本每股收益**: {eps}
+{("注: " + periods_info) if periods_info else ""}
+
+> ⚠️ **重要**: 以上数据为真实财务数据，请勿编造或修改。如需引用具体数字，必须与上述数据一致。
+> ⚠️ **时间约束**: 以上数据为已公布的历史财务数据。任何在此之后（未来）的销量、利润、产品发布等数据均为预测，不是事实，不能作为确定性论据。
+"""
+
             report = f"""# 中国A股基本面分析报告 - {symbol}
 
 ## 📊 股票基本信息
@@ -583,7 +616,7 @@ class OptimizedChinaDataProvider:
 - **流动比率**: {financial_estimates['current_ratio']}
 - **速动比率**: {financial_estimates['quick_ratio']}
 - **现金比率**: {financial_estimates['cash_ratio']}
-
+{quarterly_data_section}
 ## 📈 行业分析
 {industry_info['analysis']}
 
@@ -609,6 +642,28 @@ class OptimizedChinaDataProvider:
 """
         else:  # detailed, comprehensive
             # 详细/全面模式：包含最完整的分析
+            # 同样添加原始季度财务数据
+            quarterly_data_section_detailed = ""
+            if financial_estimates.get('quarterly_revenue') or financial_estimates.get('quarterly_net_profit'):
+                rev = financial_estimates.get('quarterly_revenue', 'N/A')
+                profit = financial_estimates.get('quarterly_net_profit', 'N/A')
+                rev_growth = financial_estimates.get('revenue_yoy_growth', 'N/A')
+                profit_growth = financial_estimates.get('net_profit_yoy_growth', 'N/A')
+                eps = financial_estimates.get('quarterly_eps', 'N/A')
+                periods_info = financial_estimates.get('financial_periods_info', '')
+                quarterly_data_section_detailed = f"""
+### 最新季度财务数据（真实数据，非估算）
+- **营业收入**: {rev}
+- **净利润**: {profit}
+- **营业收入同比增长**: {rev_growth}
+- **净利润同比增长**: {profit_growth}
+- **基本每股收益**: {eps}
+{("注: " + periods_info) if periods_info else ""}
+
+> ⚠️ **重要**: 以上数据为真实财务数据，请勿编造或修改。如需引用具体数字，必须与上述数据一致。
+> ⚠️ **时间约束**: 以上数据为已公布的历史财务数据。任何在此之后（未来）的销量、利润、产品发布等数据均为预测，不是事实，不能作为确定性论据。
+"""
+
             report = f"""# 中国A股基本面分析报告 - {symbol} (全面版)
 
 ## 📊 股票基本信息
@@ -642,7 +697,7 @@ class OptimizedChinaDataProvider:
 - **流动比率**: {financial_estimates['current_ratio']}
 - **速动比率**: {financial_estimates['quick_ratio']}
 - **现金比率**: {financial_estimates['cash_ratio']}
-
+{quarterly_data_section_detailed}
 ## 📈 行业分析
 
 ### 行业地位
@@ -911,6 +966,23 @@ class OptimizedChinaDataProvider:
                     logger.warning(f"⚠️ 从 market_quotes 获取实时股价失败: {e}，使用传入价格: {price_value}元")
             else:
                 logger.info(f"⚠️ MongoDB 不可用，使用传入价格: {price_value}元")
+
+            # 🔥 如果价格仍是默认值（10.0），尝试从 app cache 获取真实价格
+            if abs(price_value - 10.0) < 0.01:
+                try:
+                    from tradingagents.config.runtime_settings import use_app_cache_enabled
+                    if use_app_cache_enabled(False):
+                        from .cache.app_adapter import get_market_quote_dataframe
+                        code6 = symbol.replace('.SH', '').replace('.SZ', '').zfill(6)
+                        df_q = get_market_quote_dataframe(code6)
+                        if df_q is not None and not df_q.empty:
+                            real_price = float(df_q.iloc[-1].get('close', 0))
+                            if real_price > 0:
+                                old_price = price_value
+                                price_value = real_price
+                                logger.info(f"✅ 从 app cache 获取真实股价: {code6} = {real_price}元 (原默认值: {old_price}元)")
+                except Exception as e:
+                    logger.debug(f"⚠️ 从 app cache 获取股价失败: {e}，继续使用默认价格")
 
             # 第一优先级：从 MongoDB stock_financial_data 集合获取标准化财务数据
             from tradingagents.config.runtime_settings import use_app_cache_enabled
@@ -1727,6 +1799,13 @@ class OptimizedChinaDataProvider:
                 "cash_ratio": "待分析"
             })
 
+            # 提取原始季度财务数据（营收、净利润、同比增长率）供 LLM 使用
+            # 防止 LLM 编造数据
+            try:
+                self._extract_quarterly_financials(metrics, main_indicators, income_statement, financial_data)
+            except Exception as e:
+                logger.debug(f"提取原始季度财务数据失败: {e}")
+
             # 评分（基于AKShare数据的简化评分）
             fundamental_score = self._calculate_fundamental_score(metrics, stock_info)
             valuation_score = self._calculate_valuation_score(metrics)
@@ -1747,6 +1826,128 @@ class OptimizedChinaDataProvider:
         except Exception as e:
             logger.error(f"❌ AKShare财务数据解析失败: {e}")
             return None
+
+    def _extract_quarterly_financials(self, metrics: dict, main_indicators, income_statement, financial_data: dict):
+        """从 AKShare 财务数据中提取原始季度营收、净利润、同比增长率
+
+        将真实的季度财务数据添加到 metrics 中，防止 LLM 编造数据。
+        """
+        import pandas as pd
+
+        # 从 main_indicators 中提取最新季度的营收和净利润
+        if isinstance(main_indicators, pd.DataFrame) and not main_indicators.empty:
+            latest_col = main_indicators.columns[2] if len(main_indicators.columns) > 2 else None
+            if latest_col:
+                indicators_dict = {}
+                for _, row in main_indicators.iterrows():
+                    indicator_name = row['指标']
+                    value = row[latest_col]
+                    indicators_dict[indicator_name] = value
+
+                # 提取营业收入（营收）
+                revenue = indicators_dict.get('营业收入')
+                if revenue is not None and str(revenue) != 'nan' and revenue != '--':
+                    try:
+                        revenue_val = float(revenue)
+                        # 🔥 AKShare 的单位可能是元或万元，根据数值大小智能判断
+                        # 中国A股上市公司单季度营收通常在几亿到几千亿元
+                        # 如果值 > 1亿，大概率是元；否则是万元
+                        if revenue_val >= 100_000_000:
+                            # 单位是元 → 转为亿元
+                            metrics['quarterly_revenue'] = f"{revenue_val / 100_000_000:.2f}亿元"
+                        elif revenue_val >= 10000:
+                            # 单位是万元 → 转为亿元
+                            metrics['quarterly_revenue'] = f"{revenue_val / 10000:.2f}亿元"
+                        else:
+                            metrics['quarterly_revenue'] = f"{revenue_val:.2f}万元"
+                        metrics['quarterly_revenue_raw'] = revenue_val
+                    except (ValueError, TypeError):
+                        pass
+
+                # 提取净利润
+                net_profit = indicators_dict.get('净利润')
+                if net_profit is not None and str(net_profit) != 'nan' and net_profit != '--':
+                    try:
+                        profit_val = float(net_profit)
+                        # 🔥 同上，根据数值大小智能判断单位（阈值1亿）
+                        if profit_val >= 100_000_000:
+                            # 单位是元 → 转为亿元
+                            metrics['quarterly_net_profit'] = f"{profit_val / 100_000_000:.2f}亿元"
+                        elif profit_val >= 10000:
+                            # 单位是万元 → 转为亿元
+                            metrics['quarterly_net_profit'] = f"{profit_val / 10000:.2f}亿元"
+                        else:
+                            metrics['quarterly_net_profit'] = f"{profit_val:.2f}万元"
+                        metrics['quarterly_net_profit_raw'] = profit_val
+                    except (ValueError, TypeError):
+                        pass
+
+                # 提取营业收入同比增长率
+                revenue_growth = indicators_dict.get('营业收入同比增长率') or indicators_dict.get('营业收入增长率')
+                if revenue_growth is not None and str(revenue_growth) != 'nan' and revenue_growth != '--':
+                    try:
+                        growth_val = float(revenue_growth)
+                        metrics['revenue_yoy_growth'] = f"{growth_val:+.2f}%"
+                    except (ValueError, TypeError):
+                        pass
+
+                # 提取净利润同比增长率
+                profit_growth = indicators_dict.get('净利润同比增长率') or indicators_dict.get('净利润增长率')
+                if profit_growth is not None and str(profit_growth) != 'nan' and profit_growth != '--':
+                    try:
+                        growth_val = float(profit_growth)
+                        metrics['net_profit_yoy_growth'] = f"{growth_val:+.2f}%"
+                    except (ValueError, TypeError):
+                        pass
+
+                # 提取基本每股收益
+                eps = indicators_dict.get('基本每股收益')
+                if eps is not None and str(eps) != 'nan' and eps != '--':
+                    try:
+                        metrics['quarterly_eps'] = f"{float(eps):.4f}元"
+                    except (ValueError, TypeError):
+                        pass
+
+        # 从 income_statement 中提取多期数据用于对比
+        if income_statement and len(income_statement) >= 2:
+            try:
+                periods = []
+                for stmt in income_statement[:4]:  # 取最近4期
+                    period_data = {}
+                    end_date = stmt.get('end_date') or stmt.get('report_date') or ''
+                    revenue = stmt.get('total_revenue') or stmt.get('revenue')
+                    net_profit = stmt.get('net_profit') or stmt.get('n_income')
+                    if end_date:
+                        period_data['period'] = str(end_date)
+                        if revenue:
+                            period_data['revenue'] = float(revenue)
+                        if net_profit:
+                            period_data['net_profit'] = float(net_profit)
+                        periods.append(period_data)
+
+                if len(periods) >= 2:
+                    # 计算同比（与上年同期对比）
+                    latest = periods[0]
+                    prev_year_same = periods[-1] if len(periods) >= 2 else None
+                    if prev_year_same:
+                        if 'revenue' in latest and 'revenue' in prev_year_same and prev_year_same['revenue'] != 0:
+                            rev_growth = (latest['revenue'] - prev_year_same['revenue']) / abs(prev_year_same['revenue']) * 100
+                            metrics['revenue_yoy_growth'] = f"{rev_growth:+.2f}%"
+                        if 'net_profit' in latest and 'net_profit' in prev_year_same and prev_year_same['net_profit'] != 0:
+                            profit_growth = (latest['net_profit'] - prev_year_same['net_profit']) / abs(prev_year_same['net_profit']) * 100
+                            metrics['net_profit_yoy_growth'] = f"{profit_growth:+.2f}%"
+
+                    # 添加最近两期的对比信息
+                    if len(periods) >= 2 and 'revenue' in periods[0] and 'revenue' in periods[1]:
+                        metrics['financial_periods_info'] = (
+                            f"最新报告期: {periods[0]['period']}, "
+                            f"营业收入: {periods[0]['revenue'] / 10000:.2f}亿元" if periods[0]['revenue'] >= 10000 else f"{periods[0]['revenue']:.2f}万元"
+                        )
+                        if 'net_profit' in periods[0]:
+                            profit_str = f"{periods[0]['net_profit'] / 10000:.2f}亿元" if periods[0]['net_profit'] >= 10000 else f"{periods[0]['net_profit']:.2f}万元"
+                            metrics['financial_periods_info'] += f", 净利润: {profit_str}"
+            except Exception as e:
+                logger.debug(f"从 income_statement 提取多期数据失败: {e}")
 
     def _parse_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
         """解析财务数据为指标"""

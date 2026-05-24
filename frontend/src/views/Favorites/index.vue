@@ -1011,9 +1011,14 @@ const removeFavorite = async (row: any) => {
 }
 
 const viewStockDetail = (row: any) => {
+  const stockCode = String(row.stock_code || '').toUpperCase()
+  if (!stockCode) {
+    ElMessage.warning('股票代码为空，无法查看详情')
+    return
+  }
   router.push({
     name: 'StockDetail',
-    params: { code: String(row.stock_code || '').toUpperCase() }
+    params: { code: stockCode }
   })
 }
 
