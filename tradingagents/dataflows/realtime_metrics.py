@@ -510,6 +510,36 @@ def get_pe_pb_with_fallback(
     except Exception as e:
         logger.warning(f"⚠️ [PE智能策略-方案3异常] {e}")
 
+    # 4. 🔥 降级到腾讯财经 PE_TTM（实时行情接口，最稳定）
+    logger.info("   → 尝试方案4: 腾讯财经 PE_TTM")
+    try:
+        from app.services.data_sources.tencent_adapter import TencentAdapter
+        adapter = TencentAdapter()
+        quote = adapter.get_realtime_quote(str(symbol).zfill(6))
+
+        if quote and quote.get('pe_ttm') and quote['pe_ttm'] > 0:
+            pe_ttm_tc = quote['pe_ttm']
+            pb_tc = quote.get('pb')
+
+            logger.info(f"✅ [PE智能策略-成功] 使用腾讯财经 PE_TTM: PE_TTM={pe_ttm_tc}, PB={pb_tc}")
+            logger.info(f"   └─ 数据来源: 腾讯财经实时行情")
+
+            return {
+                "pe": pe_ttm_tc,
+                "pb": pb_tc,
+                "pe_ttm": pe_ttm_tc,
+                "pb_mrq": pb_tc,
+                "source": "tencent_realtime",
+                "is_realtime": True,
+                "updated_at": None,
+                "note": "使用腾讯财经实时 PE_TTM（盘中实时）"
+            }
+        else:
+            logger.warning(f"⚠️ [PE智能策略-方案4失败] 腾讯财经 PE 不可用")
+
+    except Exception as e:
+        logger.warning(f"⚠️ [PE智能策略-方案4异常] {e}")
+
     logger.error(f"❌ [PE智能策略-全部失败] 无法获取股票 {symbol} 的PE/PB")
     return {}
 
