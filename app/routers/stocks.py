@@ -557,6 +557,14 @@ async def get_kline(
             logger.error(f"❌ 外部 API 获取 K 线失败: {e}")
             raise HTTPException(status_code=500, detail=f"获取K线数据失败: {str(e)}")
 
+        # 🔥 关键修复：检查外部 API 是否返回了有效数据
+        if not items:
+            logger.error(f"❌ 所有数据源均无法获取 {code_padded} 的 K 线数据")
+            raise HTTPException(
+                status_code=503,
+                detail=f"暂时无法获取K线数据（所有数据源不可用）。请稍后重试，或等待数据源恢复（如 BaoStock/AKShare IP 解封）。"
+            )
+
     # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
     if period == "day" and items:
         try:
