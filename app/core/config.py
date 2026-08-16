@@ -276,8 +276,8 @@ class Settings(BaseSettings):
     # ==================== 分析师数据获取配置 ====================
 
     # 市场分析师数据范围配置
-    # 默认60天：可覆盖MA60等所有常用技术指标（MA5/10/20/60, MACD, RSI, BOLL）
-    MARKET_ANALYST_LOOKBACK_DAYS: int = Field(default=60, ge=5, le=365, description="市场分析回溯天数（用于技术分析）")
+    # 默认150天：确保MA60等长周期指标有足够数据（60个交易日≈90日历日+周末/节假日缓冲）
+    MARKET_ANALYST_LOOKBACK_DAYS: int = Field(default=150, ge=60, le=365, description="市场分析回溯天数（用于技术分析）")
 
     # ==================== BaoStock统一数据同步配置 ====================
 

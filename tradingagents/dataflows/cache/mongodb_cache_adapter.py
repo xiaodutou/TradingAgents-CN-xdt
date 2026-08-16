@@ -181,6 +181,15 @@ class MongoDBCacheAdapter:
             # 获取数据源优先级
             priority_order = self._get_data_source_priority(symbol)
 
+            # 🔥 关键修复：数据新鲜度检查
+            # 如果某个数据源的最新数据太旧（超过 7 天），跳过它，尝试更新的数据源
+            # 避免使用过期数据（如 Tushare 服务挂了但数据还停留在几周前）
+            from datetime import datetime, timedelta, timezone
+            from zoneinfo import ZoneInfo
+            freshness_threshold_days = 7  # 数据最多允许落后 7 天
+            now = datetime.now(ZoneInfo("Asia/Shanghai"))
+            min_acceptable_date = (now - timedelta(days=freshness_threshold_days)).strftime("%Y-%m-%d")
+
             # 按优先级查询
             for data_source in priority_order:
                 # 构建查询条件
@@ -204,8 +213,18 @@ class MongoDBCacheAdapter:
                 data = list(cursor)
 
                 if data:
+                    # 🔥 数据新鲜度检查：看最新一条数据的日期
+                    latest_date = data[-1].get("trade_date", "")
+                    if latest_date and latest_date < min_acceptable_date:
+                        logger.warning(
+                            f"⚠️ [MongoDB-{data_source}] 数据过旧: 最新={latest_date}, "
+                            f"阈值={min_acceptable_date} ({freshness_threshold_days}天内), "
+                            f"跳过此数据源，尝试下一个"
+                        )
+                        continue  # 数据太旧，尝试下一个数据源
+
                     df = pd.DataFrame(data)
-                    logger.info(f"✅ [数据来源: MongoDB-{data_source}] {symbol}, {len(df)}条记录 (period={period})")
+                    logger.info(f"✅ [数据来源: MongoDB-{data_source}] {symbol}, {len(df)}条记录 (period={period}, 最新={latest_date})")
                     return df
                 else:
                     logger.debug(f"⚠️ [MongoDB-{data_source}] 未找到{period}数据: {symbol}")

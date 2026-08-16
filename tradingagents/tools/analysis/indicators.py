@@ -318,10 +318,11 @@ def add_all_indicators(df: pd.DataFrame, close_col: str = 'close',
         raise ValueError(f"DataFrame缺少收盘价列: {close_col}")
 
     # 计算移动平均线（MA5, MA10, MA20, MA60）
-    df['ma5'] = ma(df[close_col], 5, min_periods=1)
-    df['ma10'] = ma(df[close_col], 10, min_periods=1)
-    df['ma20'] = ma(df[close_col], 20, min_periods=1)
-    df['ma60'] = ma(df[close_col], 60, min_periods=1)
+    # min_periods=n 确保数据不足时返回 NaN 而非不准确的值
+    df['ma5'] = ma(df[close_col], 5, min_periods=5)
+    df['ma10'] = ma(df[close_col], 10, min_periods=10)
+    df['ma20'] = ma(df[close_col], 20, min_periods=20)
+    df['ma60'] = ma(df[close_col], 60, min_periods=60)
 
     # 计算RSI指标
     if rsi_style == 'china':

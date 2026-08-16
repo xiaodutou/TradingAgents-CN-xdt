@@ -1544,7 +1544,7 @@ def get_china_stock_data_unified(
         logger.info(f"📅 [配置验证] 配置来源: app.core.config.Settings")
         logger.info(f"📅 [配置验证] 环境变量: MARKET_ANALYST_LOOKBACK_DAYS={lookback_days}")
     except Exception as e:
-        lookback_days = 30  # 默认30天
+        lookback_days = 150  # 默认150天（确保MA60/MACD等长周期指标有足够数据）
         logger.warning(f"⚠️ [配置验证] 无法获取配置，使用默认值: {lookback_days}天")
         logger.warning(f"⚠️ [配置验证] 错误详情: {e}")
 
