@@ -57,16 +57,31 @@ class BaoStockSyncService:
             # 🔥 初始化数据库连接（必须在异步上下文中）
             from app.core.database import get_mongo_db
             self.db = get_mongo_db()
+            logger.info(f"✅ BaoStock同步服务数据库连接成功: db={self.db.name if self.db else 'None'}")
 
-            # 初始化历史数据服务
+            # 初始化历史数据服务（可选，失败不阻塞）
             if self.historical_service is None:
-                from app.services.historical_data_service import get_historical_data_service
-                self.historical_service = await get_historical_data_service()
+                try:
+                    from app.services.historical_data_service import get_historical_data_service
+                    self.historical_service = await get_historical_data_service()
+                except Exception as e:
+                    logger.warning(f"⚠️ 历史数据服务初始化失败（不影响核心功能）: {e}")
 
             logger.info("✅ BaoStock同步服务异步初始化完成")
         except Exception as e:
             logger.error(f"❌ BaoStock同步服务异步初始化失败: {e}")
-            raise
+            # 降级：尝试直接创建 MongoDB 连接
+            try:
+                import motor.motor_asyncio
+                logger.info("🔄 尝试直接创建 MongoDB 连接...")
+                from app.core.config import get_settings
+                settings = get_settings()
+                client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGO_URI)
+                self.db = client[settings.MONGO_DB]
+                logger.info(f"✅ 直接连接成功: {self.db.name}")
+            except Exception as e2:
+                logger.error(f"❌ 直接连接也失败: {e2}")
+                raise
     
     async def sync_stock_basic_info(self, batch_size: int = 100) -> BaoStockSyncStats:
         """
@@ -229,6 +244,9 @@ class BaoStockSyncService:
 
     async def _update_stock_basic_info(self, basic_info: Dict[str, Any]):
         """更新股票基础信息到数据库"""
+        if self.db is None:
+            logger.warning("⚠️ 数据库未初始化，跳过写入 stock_basic_info")
+            return
         try:
             collection = self.db.stock_basic_info
 

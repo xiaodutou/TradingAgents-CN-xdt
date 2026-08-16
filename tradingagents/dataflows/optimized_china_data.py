@@ -1318,13 +1318,15 @@ class OptimizedChinaDataProvider:
                     # 单季度净利润会导致 PE 被夸大 ~4 倍（如 Q1 单季利润 → PE 150x，实际 TTM PE 仅 37x）
                     net_profit_ttm = latest_indicators.get('net_profit_ttm')
                     net_profit_single = latest_indicators.get('net_profit')
+                    is_ttm_data = False
                     if net_profit_ttm and net_profit_ttm > 0:
                         net_profit = net_profit_ttm
                         profit_source = "TTM（最近12个月累计）"
+                        is_ttm_data = True
                     elif net_profit_single and net_profit_single > 0:
                         net_profit = net_profit_single
-                        profit_source = "单季度（⚠️ 无 TTM 数据，可能不准确）"
-                        logger.warning(f"⚠️ [PE计算] 无 TTM 净利润数据，降级使用单季度数据。PE 会被夸大，仅供参考")
+                        profit_source = "单季度（⚠️ 无 TTM 数据，PE 会被夸大）"
+                        logger.warning(f"⚠️ [PE计算] 无 TTM 净利润数据，降级使用单季度数据。PE 会被夸大，将在报告中标注")
                     else:
                         net_profit = None
                         profit_source = None
@@ -1336,7 +1338,11 @@ class OptimizedChinaDataProvider:
                             money_cap = latest_indicators.get('money_cap')
                             if money_cap and money_cap > 0:
                                 pe_calculated = money_cap / net_profit
-                                metrics["pe"] = f"{pe_calculated:.1f}倍"
+                                # 🔥 明确标注 PE 数据来源，避免 LLM 混淆单季度 PE 与 PE_TTM
+                                if is_ttm_data:
+                                    metrics["pe"] = f"{pe_calculated:.1f}倍"
+                                else:
+                                    metrics["pe"] = f"{pe_calculated:.1f}倍（⚠️ 单季度年化，非TTM，实际PE_TTM可能更低）"
                                 logger.info(f"✅ [PE计算-第2层成功] PE={pe_calculated:.2f}倍 (基于{profit_source})")
                                 logger.info(f"   └─ 计算公式: 市值({money_cap}万元) / 净利润({net_profit}万元, {profit_source})")
                             else:

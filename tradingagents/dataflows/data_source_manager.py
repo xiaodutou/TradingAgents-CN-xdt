@@ -661,21 +661,21 @@ class DataSourceManager:
 
     def _get_volume_safely(self, data: pd.DataFrame) -> float:
         """
-        安全获取成交量数据
+        安全获取当日成交量数据（单位：股）
+        注意：不匹配 'turnover'（在某些数据源中为成交额/元，非成交量/股）
 
         Args:
             data: 股票数据DataFrame
 
         Returns:
-            float: 成交量，如果获取失败返回0
+            float: 当日成交量（股），如果获取失败返回0
         """
         try:
-            if 'volume' in data.columns:
-                return data['volume'].iloc[-1]
-            elif 'vol' in data.columns:
-                return data['vol'].iloc[-1]
-            else:
-                return 0
+            # 优先使用标准化后的列名 'vol'，兼容 'volume'
+            for col in ['vol', 'volume']:
+                if col in data.columns and len(data) > 0:
+                    return float(data[col].iloc[-1])
+            return 0
         except Exception:
             return 0
 
@@ -703,11 +703,11 @@ class DataSourceManager:
             if 'date' in data.columns:
                 data = data.sort_values('date')
 
-            # 计算移动平均线
-            data['ma5'] = data['close'].rolling(window=5, min_periods=1).mean()
-            data['ma10'] = data['close'].rolling(window=10, min_periods=1).mean()
-            data['ma20'] = data['close'].rolling(window=20, min_periods=1).mean()
-            data['ma60'] = data['close'].rolling(window=60, min_periods=1).mean()
+            # 计算移动平均线（MA60 要求至少 60 个交易日，不足时返回 NaN 而非错误值）
+            data['ma5'] = data['close'].rolling(window=5, min_periods=5).mean()
+            data['ma10'] = data['close'].rolling(window=10, min_periods=10).mean()
+            data['ma20'] = data['close'].rolling(window=20, min_periods=20).mean()
+            data['ma60'] = data['close'].rolling(window=60, min_periods=60).mean()
 
             # 计算RSI（相对强弱指标）- 同花顺风格：使用中国式SMA（EMA with adjust=True）
             # 参考：https://blog.csdn.net/u011218867/article/details/117427927
@@ -898,9 +898,17 @@ class DataSourceManager:
             result += f"   最低价: ¥{display_data['low'].min():.2f}\n"
             result += f"   平均价: ¥{display_data['close'].mean():.2f}\n"
 
-            # 防御性获取成交量数据
+            # 获取成交量数据（当日成交量，非平均）
             volume_value = self._get_volume_safely(display_data)
-            result += f"   平均成交量: {volume_value:,.0f}股\n"
+            if volume_value > 0:
+                result += f"   当日成交量: {volume_value:,.0f}股 ({volume_value/10000:,.0f}万股)\n"
+            # 近5日日均成交量
+            if 'vol' in display_data.columns and len(display_data) > 1:
+                avg_vol = display_data['vol'].mean()
+                result += f"   近{len(display_data)}日日均成交量: {avg_vol:,.0f}股 ({avg_vol/10000:,.0f}万股)\n"
+            elif 'volume' in display_data.columns and len(display_data) > 1:
+                avg_vol = display_data['volume'].mean()
+                result += f"   近{len(display_data)}日日均成交量: {avg_vol:,.0f}股 ({avg_vol/10000:,.0f}万股)\n"
 
             return result
 
@@ -1363,25 +1371,6 @@ class DataSourceManager:
     #     """使用TDX获取多周期数据 (已移除)"""
     #     logger.error(f"❌ TDX数据源已不再支持")
     #     return f"❌ TDX数据源已不再支持"
-
-    def _get_volume_safely(self, data) -> float:
-        """安全地获取成交量数据，支持多种列名"""
-        try:
-            # 支持多种可能的成交量列名
-            volume_columns = ['volume', 'vol', 'turnover', 'trade_volume']
-
-            for col in volume_columns:
-                if col in data.columns:
-                    logger.info(f"✅ 找到成交量列: {col}")
-                    return data[col].sum()
-
-            # 如果都没找到，记录警告并返回0
-            logger.warning(f"⚠️ 未找到成交量列，可用列: {list(data.columns)}")
-            return 0
-
-        except Exception as e:
-            logger.error(f"❌ 获取成交量失败: {e}")
-            return 0
 
     def _try_fallback_sources(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """

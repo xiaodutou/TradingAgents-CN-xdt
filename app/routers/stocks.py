@@ -524,10 +524,20 @@ async def get_kline(
                 })
             source = "mongodb"
             logger.info(f"✅ 从 MongoDB 获取到 {len(items)} 条 K 线数据")
+
+            # 检查数据是否充分（仅针对日线，因为定时同步只同步日线）
+            # 如果数据量少于请求量的 50% 或少于 250 条，认为数据不充分
+            # 这样会触发外部 API 回落，获取完整历史数据
+            MIN_DATA_THRESHOLD = 250  # 最少数据量阈值
+            if period == "day":
+                data_sufficient = len(items) >= max(limit * 0.5, MIN_DATA_THRESHOLD)
+                if not data_sufficient:
+                    logger.warning(f"⚠️ MongoDB 日线数据不充分 ({len(items)} 条 < {max(limit * 0.5, MIN_DATA_THRESHOLD)} 条)，将回落到外部 API")
+                    items = []  # 清空 items，触发下方的外部 API 回落
     except Exception as e:
         logger.warning(f"⚠️ MongoDB 获取 K 线失败: {e}")
 
-    # 2. 如果 MongoDB 没有数据，降级到外部 API（带超时保护）
+    # 2. 如果 MongoDB 没有数据或数据不充分，降级到外部 API（带超时保护）
     if not items:
         logger.info(f"📡 MongoDB 无数据，降级到外部 API")
         try:

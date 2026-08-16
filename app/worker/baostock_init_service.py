@@ -208,7 +208,7 @@ class BaoStockInitService:
             stats.current_step = "同步最新行情"
             logger.info(f"5️⃣ {stats.current_step}...")
             
-            quotes_stats = await self.sync_service.sync_realtime_quotes()
+            quotes_stats = await self.sync_service.sync_daily_quotes()
             stats.quotes_count = quotes_stats.quotes_count
             stats.errors.extend(quotes_stats.errors)
             stats.completed_steps += 1
@@ -316,7 +316,7 @@ class BaoStockInitService:
             stats.current_step = "同步最新行情"
             logger.info(f"2️⃣ {stats.current_step}...")
             
-            quotes_stats = await self.sync_service.sync_realtime_quotes()
+            quotes_stats = await self.sync_service.sync_daily_quotes()
             stats.quotes_count = quotes_stats.quotes_count
             stats.errors.extend(quotes_stats.errors)
             stats.completed_steps += 1

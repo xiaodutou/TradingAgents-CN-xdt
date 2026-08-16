@@ -436,8 +436,8 @@ const kOption = ref<EChartsOption>({
     type: 'value'
   },
   dataZoom: [
-    { type: 'inside', start: 70, end: 100 },
-    { start: 70, end: 100 }
+    { type: 'inside', start: 0, end: 100 },
+    { start: 0, end: 100 }
   ],
   series: [
     {
@@ -812,10 +812,23 @@ function periodLabelToParam(p: string): string {
 // 当周期切换时刷新K线
 watch(period, () => { fetchKline() })
 
+// 🔥 修复竞态条件：当分析标记数据晚于K线数据到达时，重新应用标记
+watch(analysisMarkers, (newMarkers) => {
+  if (!newMarkers || newMarkers.length === 0) return
+  // 从当前 kOption 中提取 category 和 values，重新应用标记
+  const currentOption = kOption.value as any
+  const category: string[] = currentOption?.xAxis?.data || []
+  const values: number[][] = currentOption?.series?.[0]?.data || []
+  if (category.length && values.length) {
+    console.log(`📊 分析标记数据到达（${newMarkers.length}条），重新应用到K线图`)
+    applyMarkersToKline(category, values)
+  }
+})
+
 async function fetchKline() {
   try {
     const param = periodLabelToParam(period.value)
-    const res = await stocksApi.getKline(code.value, param as any, 200, 'none')
+    const res = await stocksApi.getKline(code.value, param as any, 1000, 'none')
     const d: any = (res as any)?.data || {}
     klineSource.value = d.source
     const items: any[] = Array.isArray(d.items) ? d.items : []
@@ -960,30 +973,15 @@ async function fetchLatestAnalysis() {
     })
 
     console.log('🔍 [fetchLatestAnalysis] API响应:', resp)
-    console.log('🔍 [fetchLatestAnalysis] resp.data:', resp?.data)
-    console.log('🔍 [fetchLatestAnalysis] resp.data.data:', resp?.data?.data)
 
-    // 修复：API返回格式是 { success: true, data: { tasks: [...] } }
-    // 所以需要先取 resp.data，再取 data.tasks
-    const responseData = resp?.data || resp
-    console.log('🔍 [fetchLatestAnalysis] responseData:', responseData)
-
-    // 如果responseData有success字段，说明是标准响应格式，需要再取一层data
-    const actualData = responseData?.success ? responseData.data : responseData
-    console.log('🔍 [fetchLatestAnalysis] actualData:', actualData)
-
-    const tasks = actualData?.tasks || actualData?.analyses || []
-    console.log('🔍 [fetchLatestAnalysis] tasks:', tasks)
-    console.log('🔍 [fetchLatestAnalysis] tasks.length:', tasks?.length)
-    console.log('🔍 [fetchLatestAnalysis] tasks && tasks.length > 0:', tasks && tasks.length > 0)
+    // 响应拦截器已解包 response.data，所以 resp 直接是 { success: true, data: { tasks: [...] } }
+    // 需要取 resp.data.tasks
+    const tasks = resp?.data?.tasks || resp?.tasks || []
+    console.log('🔍 [fetchLatestAnalysis] tasks:', tasks, 'length:', tasks?.length)
 
     if (tasks && tasks.length > 0) {
       const latestTask = tasks[0]
-      console.log('✅ [fetchLatestAnalysis] 找到任务:', latestTask)
-      console.log('🔍 [fetchLatestAnalysis] latestTask.result_data:', latestTask.result_data)
-      console.log('🔍 [fetchLatestAnalysis] latestTask.result:', latestTask.result)
-      console.log('🔍 [fetchLatestAnalysis] latestTask.task_id:', latestTask.task_id)
-      console.log('🔍 [fetchLatestAnalysis] latestTask.end_time:', latestTask.end_time)
+      console.log('✅ [fetchLatestAnalysis] 找到任务:', latestTask.task_id)
 
       // 保存任务信息（包含 end_time 等）
       lastTaskInfo.value = latestTask
@@ -992,33 +990,29 @@ async function fetchLatestAnalysis() {
       if (latestTask.result_data) {
         lastAnalysis.value = latestTask.result_data
         analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result_data):', latestTask.result_data)
-        console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
+        console.log('✅ 加载历史分析报告成功 (result_data)')
       }
       // 兼容旧的 result 字段
       else if (latestTask.result) {
         lastAnalysis.value = latestTask.result
         analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result):', latestTask.result)
-        console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
+        console.log('✅ 加载历史分析报告成功 (result)')
       }
       // 否则尝试通过 task_id 获取结果
       else if (latestTask.task_id) {
-        console.log('🔍 [fetchLatestAnalysis] 通过task_id获取结果:', latestTask.task_id)
+        console.log('🔍 通过task_id获取结果:', latestTask.task_id)
         try {
           const resultResp: any = await analysisApi.getTaskResult(latestTask.task_id)
-          console.log('🔍 [fetchLatestAnalysis] getTaskResult响应:', resultResp)
+          // 同样，拦截器已解包，resultResp 直接是 { success: true, data: {...} }
           lastAnalysis.value = resultResp?.data || resultResp
           analysisStatus.value = 'completed'
-          console.log('✅ 通过 task_id 加载分析报告成功:', lastAnalysis.value)
-          console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
+          console.log('✅ 通过 task_id 加载分析报告成功')
         } catch (e) {
           console.warn('⚠️ 获取任务结果失败:', e)
         }
       }
     } else {
       console.log('ℹ️ 该股票暂无历史分析报告')
-      console.log('🔍 [fetchLatestAnalysis] 判断条件: tasks=', tasks, ', tasks.length=', tasks?.length)
     }
   } catch (e) {
     console.warn('⚠️ 获取历史分析报告失败:', e)
