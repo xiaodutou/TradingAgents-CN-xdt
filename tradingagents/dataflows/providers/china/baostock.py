@@ -585,7 +585,7 @@ class BaoStockProvider(BaseStockDataProvider):
                         start_date=start_date,
                         end_date=end_date,
                         frequency=bs_frequency,
-                        adjustflag="2"  # 前复权
+                        adjustflag="3"  # 不复权（对齐同花顺/通达信，技术分析用不复权价格）
                     )
 
                     if rs.error_code != '0':

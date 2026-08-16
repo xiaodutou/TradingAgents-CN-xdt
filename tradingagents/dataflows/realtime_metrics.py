@@ -470,6 +470,76 @@ def get_pe_pb_with_fallback(
     except Exception as e:
         logger.warning(f"⚠️ [PE智能策略-方案2异常] {e}")
 
+    # 3. 🔥 降级到 BaoStock PE_TTM（BaoStock 提供准确的 peTTM 字段）
+    logger.info("   → 尝试方案3: BaoStock PE_TTM")
+    try:
+        import asyncio
+        from tradingagents.dataflows.providers.china.baostock import BaoStockProvider
+
+        provider = BaoStockProvider()
+        code6 = str(symbol).zfill(6)
+
+        # BaoStock 估值接口直接返回 peTTM
+        loop = asyncio.new_event_loop()
+        try:
+            valuation = loop.run_until_complete(provider.get_valuation_data(code6))
+        finally:
+            loop.close()
+
+        if valuation and valuation.get('pe_ttm') and valuation['pe_ttm'] > 0:
+            pe_ttm_baostock = valuation['pe_ttm']
+            pb_mrq_baostock = valuation.get('pb_mrq')
+            close_baostock = valuation.get('close')
+
+            logger.info(f"✅ [PE智能策略-成功] 使用BaoStock PE_TTM: PE_TTM={pe_ttm_baostock}, PB={pb_mrq_baostock}")
+            logger.info(f"   └─ 数据来源: BaoStock (close={close_baostock})")
+
+            return {
+                "pe": pe_ttm_baostock,
+                "pb": pb_mrq_baostock,
+                "pe_ttm": pe_ttm_baostock,
+                "pb_mrq": pb_mrq_baostock,
+                "source": "baostock",
+                "is_realtime": False,
+                "updated_at": None,
+                "note": "使用BaoStock PE_TTM（基于最近交易日）"
+            }
+        else:
+            logger.warning(f"⚠️ [PE智能策略-方案3失败] BaoStock 估值数据不可用")
+
+    except Exception as e:
+        logger.warning(f"⚠️ [PE智能策略-方案3异常] {e}")
+
+    # 4. 🔥 降级到腾讯财经 PE_TTM（实时行情接口，最稳定）
+    logger.info("   → 尝试方案4: 腾讯财经 PE_TTM")
+    try:
+        from app.services.data_sources.tencent_adapter import TencentAdapter
+        adapter = TencentAdapter()
+        quote = adapter.get_realtime_quote(str(symbol).zfill(6))
+
+        if quote and quote.get('pe_ttm') and quote['pe_ttm'] > 0:
+            pe_ttm_tc = quote['pe_ttm']
+            pb_tc = quote.get('pb')
+
+            logger.info(f"✅ [PE智能策略-成功] 使用腾讯财经 PE_TTM: PE_TTM={pe_ttm_tc}, PB={pb_tc}")
+            logger.info(f"   └─ 数据来源: 腾讯财经实时行情")
+
+            return {
+                "pe": pe_ttm_tc,
+                "pb": pb_tc,
+                "pe_ttm": pe_ttm_tc,
+                "pb_mrq": pb_tc,
+                "source": "tencent_realtime",
+                "is_realtime": True,
+                "updated_at": None,
+                "note": "使用腾讯财经实时 PE_TTM（盘中实时）"
+            }
+        else:
+            logger.warning(f"⚠️ [PE智能策略-方案4失败] 腾讯财经 PE 不可用")
+
+    except Exception as e:
+        logger.warning(f"⚠️ [PE智能策略-方案4异常] {e}")
+
     logger.error(f"❌ [PE智能策略-全部失败] 无法获取股票 {symbol} 的PE/PB")
     return {}
 

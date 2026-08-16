@@ -1034,10 +1034,15 @@ async function fetchAnalysisMarkers() {
 
 // 将分析标记叠加到K线图上
 function applyMarkersToKline(category: string[], values: number[][]) {
-  if (!category.length || !analysisMarkers.value.length) return
+  console.log(`🔍 applyMarkersToKline: category.length=${category.length}, markers.length=${analysisMarkers.value.length}`)
+  if (!category.length || !analysisMarkers.value.length) {
+    console.log(`⚠️ 跳过标记应用: category=${category.length}, markers=${analysisMarkers.value.length}`)
+    return
+  }
 
   // 标准化K线日期数组为 YYYYMMDD 格式，用于快速查找
   const normalizedDates: string[] = category.map(d => String(d).replace(/-/g, ''))
+  console.log(`📅 K线日期范围: ${normalizedDates[0]} ~ ${normalizedDates[normalizedDates.length - 1]}`)
 
   // 查找日期对应的K线索引：如果分析日期是非交易日，找最近的前一个交易日
   function findTradingDateIdx(targetDate: string): number {
@@ -1052,18 +1057,24 @@ function applyMarkersToKline(category: string[], values: number[][]) {
 
   // 同一天多次分析只取最新的一条（markers已按日期倒序排列，先出现的优先）
   const deduped = new Map<string, typeof analysisMarkers.value[0]>()
+  console.log(`📊 原始 markers:`, analysisMarkers.value.map(m => ({date: m.date, action: m.action})))
   for (const marker of analysisMarkers.value) {
     const key = marker.date.split('T')[0]
     if (!deduped.has(key)) {
       deduped.set(key, marker)
     }
   }
+  console.log(`📊 去重后 markers: ${deduped.size} 个日期`, Array.from(deduped.keys()))
 
   const markPointData: any[] = []
 
   for (const [dateKey, marker] of deduped.entries()) {
     const idx = findTradingDateIdx(dateKey)
-    if (idx === -1) continue
+    console.log(`🔍 处理 marker: date=${dateKey}, action=${marker.action}, idx=${idx}`)
+    if (idx === -1) {
+      console.log(`⚠️ 跳过 marker: 找不到对应的K线日期 ${dateKey}`)
+      continue
+    }
 
     const isBuy = marker.action === '买入'
     const isSell = marker.action === '卖出'
@@ -1093,6 +1104,7 @@ function applyMarkersToKline(category: string[], values: number[][]) {
     })
   }
 
+  console.log(`✅ 生成 ${markPointData.length} 个标记点`)
   if (markPointData.length) {
     const series = (kOption.value as any).series
     if (series && series[0]) {

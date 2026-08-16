@@ -6,7 +6,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from app.core.database import get_mongo_db
 from app.services.favorites_service import favorites_service
@@ -104,6 +104,22 @@ class AutoAnalysisService:
             # 执行分析
             await service.execute_analysis_background(task_id, user_id, request)
 
+            # 🔥 关键修复：确保分析结果保存到 analysis_reports（用于 K 线图标记展示）
+            # execute_analysis_background 可能因后台执行问题未保存，这里做兜底保存
+            try:
+                task = await self._get_task_result(task_id)
+                if task and task.get('result'):
+                    result_data = task['result']
+                    if result_data.get('decision'):
+                        await service._save_analysis_results_complete(task_id, result_data)
+                        logger.info(f"✅ 自动分析结果已保存到 analysis_reports: {task_id}")
+                    else:
+                        logger.warning(f"⚠️ 自动分析结果无 decision，跳过保存: {task_id}")
+                else:
+                    logger.warning(f"⚠️ 自动分析无结果数据，跳过保存: {task_id}")
+            except Exception as save_err:
+                logger.error(f"❌ 自动分析结果保存失败（不影响分析状态）: {task_id} - {save_err}")
+
             logger.info(f"自动分析完成: {stock_code}（用户 {user_id}），任务ID: {task_id}")
             return {"success": True, "task_id": task_id, "stock_code": stock_code}
 
@@ -113,6 +129,34 @@ class AutoAnalysisService:
                 exc_info=True
             )
             return {"success": False, "error": str(e), "stock_code": stock_code}
+
+    async def _get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """从 memory_manager 获取任务结果"""
+        try:
+            from app.services.simple_analysis_service import get_simple_analysis_service
+            service = get_simple_analysis_service()
+            task = await service.memory_manager.get_task(task_id)
+            if task:
+                return {
+                    'result': task.get('result_data') or task.get('result'),
+                    'status': task.get('status')
+                }
+        except Exception as e:
+            logger.warning(f"获取任务结果失败: {task_id} - {e}")
+
+        # 降级：从 MongoDB 获取
+        try:
+            db = get_mongo_db()
+            task_doc = await db.analysis_tasks.find_one({'task_id': task_id})
+            if task_doc:
+                return {
+                    'result': task_doc.get('result'),
+                    'status': task_doc.get('status')
+                }
+        except Exception as e:
+            logger.warning(f"从 MongoDB 获取任务结果失败: {task_id} - {e}")
+
+        return None
 
     async def _has_running_task(self, user_id: str, stock_code: str) -> bool:
         """检查用户是否已有该股票的运行中任务（pending/processing）"""
