@@ -470,6 +470,46 @@ def get_pe_pb_with_fallback(
     except Exception as e:
         logger.warning(f"⚠️ [PE智能策略-方案2异常] {e}")
 
+    # 3. 🔥 降级到 BaoStock PE_TTM（BaoStock 提供准确的 peTTM 字段）
+    logger.info("   → 尝试方案3: BaoStock PE_TTM")
+    try:
+        import asyncio
+        from tradingagents.dataflows.providers.china.baostock import BaoStockProvider
+
+        provider = BaoStockProvider()
+        code6 = str(symbol).zfill(6)
+
+        # BaoStock 估值接口直接返回 peTTM
+        loop = asyncio.new_event_loop()
+        try:
+            valuation = loop.run_until_complete(provider.get_valuation_data(code6))
+        finally:
+            loop.close()
+
+        if valuation and valuation.get('pe_ttm') and valuation['pe_ttm'] > 0:
+            pe_ttm_baostock = valuation['pe_ttm']
+            pb_mrq_baostock = valuation.get('pb_mrq')
+            close_baostock = valuation.get('close')
+
+            logger.info(f"✅ [PE智能策略-成功] 使用BaoStock PE_TTM: PE_TTM={pe_ttm_baostock}, PB={pb_mrq_baostock}")
+            logger.info(f"   └─ 数据来源: BaoStock (close={close_baostock})")
+
+            return {
+                "pe": pe_ttm_baostock,
+                "pb": pb_mrq_baostock,
+                "pe_ttm": pe_ttm_baostock,
+                "pb_mrq": pb_mrq_baostock,
+                "source": "baostock",
+                "is_realtime": False,
+                "updated_at": None,
+                "note": "使用BaoStock PE_TTM（基于最近交易日）"
+            }
+        else:
+            logger.warning(f"⚠️ [PE智能策略-方案3失败] BaoStock 估值数据不可用")
+
+    except Exception as e:
+        logger.warning(f"⚠️ [PE智能策略-方案3异常] {e}")
+
     logger.error(f"❌ [PE智能策略-全部失败] 无法获取股票 {symbol} 的PE/PB")
     return {}
 
