@@ -93,6 +93,7 @@ class AutoAnalysisService:
             )
             request = SingleAnalysisRequest(
                 symbol=stock_code,
+                stock_code=stock_code,  # 兼容字段：部分代码路径仍直接读取 stock_code
                 parameters=params,
             )
 
@@ -107,16 +108,25 @@ class AutoAnalysisService:
             # 🔥 关键修复：确保分析结果保存到 analysis_reports（用于 K 线图标记展示）
             # execute_analysis_background 可能因后台执行问题未保存，这里做兜底保存
             try:
-                task = await self._get_task_result(task_id)
-                if task and task.get('result'):
-                    result_data = task['result']
-                    if result_data.get('decision'):
-                        await service._save_analysis_results_complete(task_id, result_data)
-                        logger.info(f"✅ 自动分析结果已保存到 analysis_reports: {task_id}")
-                    else:
-                        logger.warning(f"⚠️ 自动分析结果无 decision，跳过保存: {task_id}")
+                # 🔧 防重复：execute_analysis_background 正常完成时已保存过一次，
+                # 只有 analysis_reports 中确实没有该任务的报告时才兜底补存
+                db = get_mongo_db()
+                existing = await db.analysis_reports.find_one(
+                    {"task_id": task_id}, {"_id": 1}
+                )
+                if existing:
+                    logger.info(f"ℹ️ 报告已由主流程保存，跳过兜底保存: {task_id}")
                 else:
-                    logger.warning(f"⚠️ 自动分析无结果数据，跳过保存: {task_id}")
+                    task = await self._get_task_result(task_id)
+                    if task and task.get('result'):
+                        result_data = task['result']
+                        if result_data.get('decision'):
+                            await service._save_analysis_results_complete(task_id, result_data)
+                            logger.info(f"✅ 自动分析结果已兜底保存到 analysis_reports: {task_id}")
+                        else:
+                            logger.warning(f"⚠️ 自动分析结果无 decision，跳过保存: {task_id}")
+                    else:
+                        logger.warning(f"⚠️ 自动分析无结果数据，跳过保存: {task_id}")
             except Exception as save_err:
                 logger.error(f"❌ 自动分析结果保存失败（不影响分析状态）: {task_id} - {save_err}")
 
