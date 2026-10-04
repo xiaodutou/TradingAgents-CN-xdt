@@ -975,9 +975,9 @@ class SimpleAnalysisService:
                     payload=NotificationCreate(
                         user_id=str(user_id),
                         type='analysis',
-                        title=f"{request.stock_code} 分析完成",
+                        title=f"{request.get_symbol()} 分析完成",
                         content=summary,
-                        link=f"/stocks/{request.stock_code}",
+                        link=f"/stocks/{request.get_symbol()}",
                         source='analysis'
                     )
                 )
@@ -1045,7 +1045,7 @@ class SimpleAnalysisService:
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
         loop = asyncio.get_event_loop()
-        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {request.stock_code}")
+        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {request.get_symbol()}")
         result = await loop.run_in_executor(
             self._thread_pool,  # 使用共享线程池
             self._run_analysis_sync,
@@ -1071,8 +1071,8 @@ class SimpleAnalysisService:
             init_logging()
             thread_logger = get_logger('analysis_thread')
 
-            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
-            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
+            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.get_symbol()}")
+            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.get_symbol()}")
 
             # 🔧 根据 RedisProgressTracker 的步骤权重计算准确的进度
             # 基础准备阶段 (10%): 0.03 + 0.02 + 0.01 + 0.02 + 0.02 = 0.10
@@ -1744,7 +1744,7 @@ class SimpleAnalysisService:
 
             # 5. 最后的备用方案
             if not summary:
-                summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
+                summary = f"对{request.get_symbol()}的分析已完成，请查看详细报告。"
                 logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
 
             if not recommendation:
@@ -1755,10 +1755,13 @@ class SimpleAnalysisService:
             model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
 
             # 构建结果
+            # 🔧 修复：使用 get_symbol() 兼容 symbol/stock_code 双字段，
+            # 直接用 request.stock_code 会在仅传 symbol 时得到 None（如自动分析）
+            _result_symbol = request.get_symbol()
             result = {
                 "analysis_id": str(uuid.uuid4()),
-                "stock_code": request.stock_code,
-                "stock_symbol": request.stock_code,  # 添加stock_symbol字段以保持兼容性
+                "stock_code": _result_symbol,
+                "stock_symbol": _result_symbol,  # 添加stock_symbol字段以保持兼容性
                 "analysis_date": analysis_date,
                 "summary": summary,
                 "recommendation": recommendation,
@@ -2364,7 +2367,18 @@ class SimpleAnalysisService:
             # 生成分析ID（与web目录保持一致）
             from datetime import datetime
             timestamp = datetime.utcnow()  # 存储 UTC 时间（标准做法）
-            stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
+            # 🔧 修复：.get(key, default) 在 key 存在但值为 None 时不会走默认值，
+            # 需要用 or 链兜底；再不行则从 analysis_tasks 回填，避免存入 None
+            stock_symbol = result.get('stock_symbol') or result.get('stock_code')
+            if not stock_symbol:
+                task_doc = await db.analysis_tasks.find_one(
+                    {"task_id": task_id}, {"stock_code": 1, "symbol": 1}
+                )
+                if task_doc:
+                    stock_symbol = task_doc.get("stock_code") or task_doc.get("symbol")
+                if stock_symbol:
+                    logger.warning(f"⚠️ result缺少股票代码，已从任务记录回填: {stock_symbol}")
+            stock_symbol = stock_symbol or 'UNKNOWN'
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
             # 处理reports字段 - 从state中提取所有分析报告
@@ -2653,7 +2667,21 @@ class SimpleAnalysisService:
             logger.info(f"🔍 [调试] stock_symbol: {result.get('stock_symbol', 'NOT_FOUND')}")
 
             # 优先使用stock_symbol，如果没有则使用stock_code
-            stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
+            # 🔧 修复：.get(key, default) 在 key 存在但值为 None 时不会走默认值，需用 or 链兜底
+            stock_symbol = result.get('stock_symbol') or result.get('stock_code')
+            if not stock_symbol:
+                try:
+                    db = get_mongo_db()
+                    task_doc = await db.analysis_tasks.find_one(
+                        {"task_id": task_id}, {"stock_code": 1, "symbol": 1}
+                    )
+                    if task_doc:
+                        stock_symbol = task_doc.get("stock_code") or task_doc.get("symbol")
+                    if stock_symbol:
+                        logger.warning(f"⚠️ result缺少股票代码，已从任务记录回填: {stock_symbol}")
+                except Exception as backfill_err:
+                    logger.warning(f"⚠️ 从任务记录回填股票代码失败: {backfill_err}")
+            stock_symbol = stock_symbol or 'UNKNOWN'
             logger.info(f"💾 开始完整保存分析结果: {stock_symbol}")
 
             # 1. 保存分模块报告到本地目录
