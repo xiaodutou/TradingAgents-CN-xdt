@@ -359,6 +359,13 @@
               <!-- AI模型配置 -->
               <div class="config-section">
                 <h4 class="config-title">🤖 AI模型配置</h4>
+                <el-alert
+                  v-if="modelSettings.quickAnalysisModel?.startsWith('chatgpt-plus/') || modelSettings.deepAnalysisModel?.startsWith('chatgpt-plus/')"
+                  title="使用 ChatGPT 会员额度"
+                  type="info" :closable="false" style="margin-bottom: 12px"
+                >
+                  <a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener noreferrer">管理用量与限额</a>
+                </el-alert>
                 <div class="model-config">
                   <div class="model-item">
                     <div class="model-label">

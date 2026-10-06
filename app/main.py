@@ -629,6 +629,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from app.routers.chatgpt_plan import router as chatgpt_plan_router
+app.include_router(chatgpt_plan_router, prefix="/api")
+
 # 安全中间件
 if not settings.DEBUG:
     app.add_middleware(

@@ -183,7 +183,10 @@ const createAxiosInstance = (): AxiosInstance => {
         appStore.setLoading(false)
       }
 
-      console.log(`✅ API响应: ${response.status} ${response.config.url}`, response.data)
+      // Reauthorization URLs may contain an ID-token hint; never log them.
+      if (!String(response.config.url).startsWith('/api/chatgpt-plan/')) {
+        console.log(`✅ API响应: ${response.status} ${response.config.url}`, response.data)
+      }
 
       // 检查业务状态码
       const data = response.data as ApiResponse

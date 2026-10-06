@@ -69,6 +69,9 @@ class OpenAIClient(BaseLLMClient):
         self.provider = provider.lower()
 
     def get_llm(self) -> Any:
+        if self.model.startswith("chatgpt-plus/"):
+            from .chatgpt_plan import ChatGPTPlanChatModel
+            return ChatGPTPlanChatModel(model_name=self.model, timeout=self.kwargs.get("timeout", 180))
         self.warn_if_unknown_model()
         llm_kwargs = {"model": self.model}
 
