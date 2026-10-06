@@ -22,7 +22,7 @@ dependencies = [
     "redis>=6.2.0",
 
     # 认证和安全
-    "PyJWT>=2.0.0",
+    "PyJWT[crypto]>=2.0.0",
     "bcrypt>=4.0.0",
 
     # 任务调度和异步

@@ -28,6 +28,10 @@
             @select="handleMenuSelect"
             class="config-nav"
           >
+            <el-menu-item index="chatgpt-plus">
+              <el-icon><Key /></el-icon>
+              <span>ChatGPT Plus</span>
+            </el-menu-item>
             <el-menu-item index="validation">
               <el-icon><CircleCheck /></el-icon>
               <span>配置验证</span>
@@ -70,6 +74,7 @@
 
       <!-- 右侧：配置内容 -->
       <el-col :span="20">
+        <ChatGPTPlanPanel v-if="activeTab === 'chatgpt-plus'" />
         <!-- 配置验证 -->
         <div v-show="activeTab === 'validation'">
           <ConfigValidator />
@@ -1115,6 +1120,7 @@ import {
   type SettingMeta
 } from '@/api/config'
 import ConfigValidator from '@/components/ConfigValidator.vue'
+import ChatGPTPlanPanel from './components/ChatGPTPlanPanel.vue'
 import LLMConfigDialog from './components/LLMConfigDialog.vue'
 import ProviderDialog from './components/ProviderDialog.vue'
 import ModelCatalogManagement from './components/ModelCatalogManagement.vue'
@@ -1140,7 +1146,7 @@ type LLMConfigGroup = {
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 // 响应式数据
-const activeTab = ref('validation')
+const activeTab = ref(new URLSearchParams(window.location.search).get('tab') === 'chatgpt-plus' ? 'chatgpt-plus' : 'validation')
 const providers = ref<LLMProvider[]>([])
 const llmConfigs = ref<LLMConfig[]>([])
 const llmConfigGroups = ref<LLMConfigGroup[]>([])
